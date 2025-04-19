@@ -1,0 +1,121 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme */
+    --background: 340 20% 97%;
+    --foreground: 340 10% 20%;
+    --card: 0 0% 100%;
+    --card-foreground: 340 10% 20%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 340 10% 20%;
+    --primary: 340 90% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 280 80% 65%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 340 20% 94%;
+    --muted-foreground: 340 10% 45%;
+    --accent: 280 70% 92%;
+    --accent-foreground: 280 70% 20%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 340 20% 88%;
+    --input: 340 20% 88%;
+    --ring: 340 90% 50%;
+    --radius: 0.75rem;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    /* Dark theme - Love-inspired, soothing colors */
+    --background: 340 30% 10%; /* Deeper muted purple-red */
+    --foreground: 340 10% 95%; /* Softer warm light text for better contrast */
+    --card: 340 25% 13%; 
+    --card-foreground: 340 10% 95%;
+    --popover: 340 25% 13%;
+    --popover-foreground: 340 10% 95%;
+    --primary: 340 70% 55%; /* Slightly darker pink for better visibility */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 280 60% 40%; /* Deeper muted purple */
+    --secondary-foreground: 0 0% 100%;
+    --muted: 340 20% 18%; 
+    --muted-foreground: 340 10% 75%;
+    --accent: 280 30% 22%; /* Deep purple accent */
+    --accent-foreground: 280 70% 95%;
+    --destructive: 0 62.8% 35.6%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 340 15% 20%;
+    --input: 340 15% 20%;
+    --ring: 340 70% 45%;
+    --sidebar-background: 340 25% 13%;
+    --sidebar-foreground: 340 10% 80%;
+    --sidebar-primary: 340 25% 15%;
+    --sidebar-primary-foreground: 340 10% 95%;
+    --sidebar-accent: 340 20% 18%;
+    --sidebar-accent-foreground: 340 10% 95%;
+    --sidebar-border: 340 15% 20%;
+    --sidebar-ring: 340 70% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+.gradient-bg {
+  background: linear-gradient(135deg, rgba(130, 18, 60, 0.2) 0%, rgba(96, 34, 156, 0.2) 100%);
+}
+
+.love-card {
+  backdrop-filter: blur(10px);
+  background: rgba(25, 15, 25, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(10, 5, 15, 0.3);
+}
+
+@layer components {
+  .love-button {
+    @apply bg-primary text-white font-semibold rounded-full shadow-md hover:bg-primary/90 transition-all duration-300 ease-in-out;
+  }
+}
+
+/* Enhanced dark mode styles */
+.dark .card-hover {
+  @apply hover:bg-love-900/40 transition-colors duration-300;
+}
+
+.dark .soft-glow {
+  box-shadow: 0 0 15px rgba(190, 18, 60, 0.15);
+}
+
+.dark .text-gradient {
+  @apply bg-gradient-to-r from-love-300 to-purple-300 text-transparent bg-clip-text;
+}
+
+.dark .accent-border {
+  border-color: rgba(190, 18, 60, 0.3);
+}
+
+.dark .form-input {
+  @apply bg-love-900/50 border-love-800;
+}

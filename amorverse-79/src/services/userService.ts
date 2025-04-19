@@ -1,0 +1,52 @@
+import { useAuth } from "@clerk/clerk-react";
+import api from "./api";
+
+export interface UserProfile {
+  id: string;
+  clerkId: string;
+  email: string;
+  name: string;
+  credits: number;
+  songCount: number;
+  createdAt: string;
+}
+
+export const getUserProfile = async (): Promise<UserProfile> => {
+  const { getToken, isLoaded } = useAuth();
+
+  if (!isLoaded || !getToken) return;
+
+  try {
+    const token = await getToken();
+    const response = await api.get("/profile", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    console.log("Profile Data: ", response.data);
+    return response.data;
+  } catch (err) {
+    console.error("Failed to initialize auth token:", err);
+  }
+};
+
+export const addCredits = async (
+  planId: string,
+  credits: number,
+  amount: number
+): Promise<any> => {
+  const response = await api.post("/process-payment", {
+    paymentId: planId,
+    amount,
+    credits,
+  });
+  return response.data;
+};
+
+export const getPurchaseHistory = async (
+  page = 1,
+  limit = 10
+): Promise<any> => {
+  const response = await api.get(`/purchases?page=${page}&limit=${limit}`);
+  return response.data;
+};
