@@ -25,7 +25,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           console.log("Initializing auth token");
           setAuthToken(token);
           setIsInitialized(true);
-          await fetch(`${API_BASE_URL}/sync-user`, {
+          await fetch(`${API_BASE_URL}/auth/sync-user`, {
             headers: {
               Authorization: `Bearer ${token}`,
             },

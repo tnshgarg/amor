@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const { Webhook } = require("svix");
 const cors = require("cors");
 const crypto = require("crypto");
+// const Razorpay = require("razorpay");
 // middleware/authenticateUser.js
 const { clerkClient, verifyToken } = require("@clerk/clerk-sdk-node");
 
@@ -78,6 +79,12 @@ const User = mongoose.model("User", UserSchema);
 const Song = mongoose.model("Song", SongSchema);
 const Issue = mongoose.model("Issue", IssueSchema);
 const Purchase = mongoose.model("Purchase", PurchaseSchema);
+
+// Initialize Razorpay client
+// const razorpay = new Razorpay({
+//   key_id: process.env.RAZORPAY_KEY_ID,
+//   key_secret: process.env.RAZORPAY_KEY_SECRET,
+// });
 
 const app = express();
 app.use(express.json());
@@ -191,7 +198,7 @@ const errorHandler = async (err, req, res, next) => {
   });
 };
 
-app.post("/sync-user", authenticateUser, async (req, res) => {
+app.post("/auth/sync-user", authenticateUser, async (req, res) => {
   res.status(200).json({ message: "User synced", user: req.user });
 });
 
@@ -263,135 +270,196 @@ app.post("/generate-song", authenticateUser, async (req, res, next) => {
       return res.status(400).json({ error: "Song title is required" });
     }
 
-    // Check if user has enough credits
-    if (req.user.credits <= 0) {
+    // Step 1: Generate lyrics using Claude AI
+
+    const deductResponse = await axios.post(
+      `${process.env.API_BASE_URL}/deduct-credits`,
+      { amount: 1 },
+      {
+        headers: {
+          Authorization: req.headers.authorization,
+        },
+      }
+    );
+
+    if (deductResponse.status !== 200) {
       return res.status(403).json({
         error: "Insufficient credits",
         credits: req.user.credits,
       });
     }
 
-    // Step 1: Generate lyrics using Claude AI
-    const claudeResponse = await axios.post(
-      "https://api.anthropic.com/v1/messages",
-      {
-        model: "claude-3-sonnet-20240229",
-        max_tokens: 1000,
-        messages: [
-          {
-            role: "user",
-            content: `Create soul-stirring, emotionally profound song lyrics based on this love story. The lyrics should feel intensely personal and capture the essence of the relationship described:
-    
-    Love Story:
-    ${loveStory}
-    
-    Craft these lyrics to:
-    - Include a memorable chorus that repeats 2-3 times and contains the emotional core of the story
-    - Utilize powerful imagery and sensory details specific to the relationship
-    - Incorporate metaphors that elevate the emotional impact
-    - Focus on authentic, raw emotion rather than clichés
-    - Contain 24-30 lines total with clear verse/chorus structure
-    - Include at least one striking, memorable line that captures the relationship's unique essence
-    - Balance universal themes with specific details from the love story
-    - Consider the emotional journey and arc of the relationship
-    
-    The lyrics should feel like they were written specifically for this couple, as if someone who knows them intimately crafted a song that would move them to tears.
-    
-    Write only the finished lyrics, without explanation, title, chords, or notations.`,
+    if (
+      deductResponse.data &&
+      deductResponse.data.newCreditBalance !== undefined
+    ) {
+      const newCreditBalance = deductResponse.data.newCreditBalance;
+      await User.findByIdAndUpdate(userId, { credits: newCreditBalance });
+
+      const claudeResponse = await axios.post(
+        "https://api.anthropic.com/v1/messages",
+        {
+          model: "claude-3-sonnet-20240229",
+          max_tokens: 1000,
+          messages: [
+            {
+              role: "user",
+              content: `Create soul-stirring, emotionally profound song lyrics based on this love story. The lyrics should feel intensely personal and capture the essence of the relationship described:
+      
+      Love Story:
+      ${loveStory}
+      
+      Craft these lyrics to:
+      - Include a memorable chorus that repeats 2-3 times and contains the emotional core of the story
+      - Utilize powerful imagery and sensory details specific to the relationship
+      - Incorporate metaphors that elevate the emotional impact
+      - Focus on authentic, raw emotion rather than clichés
+      - Contain 24-30 lines total with clear verse/chorus structure
+      - Include at least one striking, memorable line that captures the relationship's unique essence
+      - Balance universal themes with specific details from the love story
+      - Consider the emotional journey and arc of the relationship
+      
+      The lyrics should feel like they were written specifically for this couple, as if someone who knows them intimately crafted a song that would move them to tears.
+      
+      Write only the finished lyrics, without explanation, title, chords, or notations.`,
+            },
+          ],
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": process.env.CLAUDE_API_KEY,
+            "anthropic-version": "2023-06-01",
           },
-        ],
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": process.env.CLAUDE_API_KEY,
-          "anthropic-version": "2023-06-01",
+        }
+      );
+
+      // Extract lyrics from Claude's response
+      const lyrics = claudeResponse.data.content[0].text.trim();
+
+      console.log("Generated lyrics:", lyrics);
+
+      // Generate a unique ID for callback
+      const callbackId =
+        Date.now().toString() + Math.random().toString(36).substring(2, 15);
+
+      // Create a callback URL for this task
+      const callbackUrl = `${process.env.API_BASE_URL}/suno-callback/${callbackId}`;
+
+      // Store initial info in the Map
+      taskCallbacks.set(callbackId, {
+        userId,
+        clerkId,
+        lyrics,
+        songUrl: null,
+        status: "processing",
+        created: new Date(),
+      });
+
+      // Step 2: Generate song using Suno API with the lyrics
+      const sunoResponse = await axios.post(
+        "https://apibox.erweima.ai/api/v1/generate",
+        {
+          prompt: lyrics,
+          title: songTitle,
+          model: "V3_5",
+          customMode: true,
+          instrumental: false,
+          callbackUrl: callbackUrl,
         },
-      }
-    );
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.SUNO_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-    // Extract lyrics from Claude's response
-    const lyrics = claudeResponse.data.content[0].text.trim();
+      console.log("Suno response:", sunoResponse.data);
 
-    console.log("Generated lyrics:", lyrics);
+      const taskId = sunoResponse.data.data.taskId;
 
-    // Generate a unique ID for callback
-    const callbackId =
-      Date.now().toString() + Math.random().toString(36).substring(2, 15);
+      // Store taskId in our callback map
+      const taskInfo = taskCallbacks.get(callbackId);
+      taskInfo.taskId = taskId;
+      taskCallbacks.set(callbackId, taskInfo);
 
-    // Create a callback URL for this task
-    const callbackUrl = `${process.env.API_BASE_URL}/suno-callback/${callbackId}`;
+      // Create song record in database
+      const song = new Song({
+        userId,
+        clerkId,
+        songTitle,
+        loveStory,
+        lyrics,
+        sunoTaskId: taskId,
+        callbackId,
+        status: "processing",
+      });
+      await song.save();
 
-    // Store initial info in the Map
-    taskCallbacks.set(callbackId, {
-      userId,
-      clerkId,
-      lyrics,
-      songUrl: null,
-      status: "processing",
-      created: new Date(),
-    });
-
-    // Step 2: Generate song using Suno API with the lyrics
-    const sunoResponse = await axios.post(
-      "https://apibox.erweima.ai/api/v1/generate",
-      {
-        prompt: lyrics,
-        title: songTitle,
-        model: "V3_5",
-        customMode: true,
-        instrumental: false,
-        callbackUrl: callbackUrl,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.SUNO_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    console.log("Suno response:", sunoResponse.data);
-
-    const taskId = sunoResponse.data.data.taskId;
-
-    // Store taskId in our callback map
-    const taskInfo = taskCallbacks.get(callbackId);
-    taskInfo.taskId = taskId;
-    taskCallbacks.set(callbackId, taskInfo);
-
-    // Create song record in database
-    const song = new Song({
-      userId,
-      clerkId,
-      songTitle,
-      loveStory,
-      lyrics,
-      sunoTaskId: taskId,
-      callbackId,
-      status: "processing",
-    });
-    await song.save();
-
-    // Deduct one credit from user
-    await User.findByIdAndUpdate(userId, { $inc: { credits: -1 } });
-
-    // Return both IDs for status checking
-    res.json({
-      taskId: taskId,
-      callbackId: callbackId,
-      lyrics: lyrics,
-      status: "processing",
-      creditsLeft: req.user.credits - 1,
-      message:
-        "Song generation has started. You can check status using the taskId or callbackId.",
-    });
+      // Return both IDs for status checking
+      res.json({
+        taskId: taskId,
+        callbackId: callbackId,
+        lyrics: lyrics,
+        status: "processing",
+        creditsLeft: newCreditBalance,
+        message:
+          "Song generation has started. You can check status using the taskId or callbackId.",
+      });
+    } else {
+      return res.status(403).json({
+        error: "Insufficient credits",
+        credits: req.user.credits,
+      });
+    }
   } catch (error) {
     await logIssue(
       req.user?._id,
       req.user?.clerkId,
       "song_generation",
       "Failed to generate song",
+      error.stack
+    );
+    next(error);
+  }
+});
+
+// deduct credits endpoint
+app.post("/deduct-credits", authenticateUser, async (req, res, next) => {
+  try {
+    const { amount } = req.body;
+    const userId = req.user._id;
+
+    if (!amount || amount <= 0 || !Number.isInteger(amount)) {
+      return res.status(400).json({ error: "Valid credit amount required" });
+    }
+
+    // Check if user has enough credits
+    if (req.user.credits < amount) {
+      return res.status(403).json({
+        error: "Insufficient credits",
+        credits: req.user.credits,
+      });
+    }
+
+    // Update user credits
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $inc: { credits: -amount } },
+      { new: true }
+    );
+
+    res.json({
+      message: `Deducted ${amount} credits successfully`,
+      newCreditBalance: updatedUser.credits,
+    });
+  } catch (error) {
+    await logIssue(
+      req.user._id,
+      req.user.clerkId,
+      "deduct_credits",
+      "Failed to deduct credits",
       error.stack
     );
     next(error);
@@ -848,94 +916,165 @@ app.post("/report-issue", authenticateUser, async (req, res, next) => {
   }
 });
 
-// Process a payment and add credits
-app.post("/process-payment", authenticateUser, async (req, res, next) => {
-  try {
-    const { paymentId, amount, credits } = req.body;
+// // Create a new order with Razorpay
+// app.post("/create-order", authenticateUser, async (req, res, next) => {
+//   try {
+//     const { amount } = req.body;
 
-    if (!paymentId || !amount || !credits) {
-      return res.status(400).json({
-        error: "Payment ID, amount, and credits are required",
-      });
-    }
+//     if (!amount || amount <= 0 || !Number.isInteger(amount)) {
+//       return res.status(400).json({ error: "Valid amount required" });
+//     }
 
-    // Create a purchase record
-    const purchase = new Purchase({
-      userId: req.user._id,
-      clerkId: req.user.clerkId,
-      amount,
-      credits,
-      paymentId,
-      status: "completed", // In a real app, this would be set after payment confirmation
-      completedAt: new Date(),
-    });
+//     const options = {
+//       amount: amount, // amount in the smallest currency unit
+//       currency: "INR",
+//       receipt: `receipt_${Date.now()}`,
+//     };
 
-    await purchase.save();
+//     razorpay.orders.create(options, function (err, order) {
+//       if (err) {
+//         console.error(err);
+//         return res.status(500).json({ error: "Failed to create order" });
+//       }
+//       res.json({
+//         order_id: order.id,
+//       });
+//     });
+//   } catch (error) {
+//     await logIssue(
+//       req.user._id,
+//       req.user.clerkId,
+//       "create_order",
+//       "Failed to create Razorpay order",
+//       error.stack
+//     );
+//     next(error);
+//   }
+// });
 
-    // Add credits to user account
-    const updatedUser = await User.findByIdAndUpdate(
-      req.user._id,
-      { $inc: { credits } },
-      { new: true }
-    );
+// // Process a payment and add credits
+// app.post("/process-payment", authenticateUser, async (req, res, next) => {
+//   try {
+//     const {
+//       razorpay_payment_id,
+//       razorpay_order_id,
+//       razorpay_signature,
+//       amount,
+//       credits,
+//     } = req.body;
 
-    res.status(201).json({
-      message: `Added ${credits} credits successfully`,
-      purchase: {
-        id: purchase._id,
-        amount,
-        credits,
-        status: purchase.status,
-        completedAt: purchase.completedAt,
-      },
-      newCreditBalance: updatedUser.credits,
-    });
-  } catch (error) {
-    await logIssue(
-      req.user._id,
-      req.user.clerkId,
-      "payment_processing",
-      "Failed to process payment",
-      error.stack
-    );
-    next(error);
-  }
-});
+//     // Verify all required fields are present
+//     if (
+//       !razorpay_payment_id ||
+//       !razorpay_order_id ||
+//       !razorpay_signature ||
+//       !amount ||
+//       !credits
+//     ) {
+//       return res.status(400).json({
+//         error: "Payment verification failed",
+//         message: "Missing required payment parameters",
+//       });
+//     }
 
-// Get purchase history
-app.get("/purchases", authenticateUser, async (req, res, next) => {
-  try {
-    const page = Number.parseInt(req.query.page) || 1;
-    const limit = Number.parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+//     // Verify payment signature using Razorpay's utility function
+//     const generated_signature = crypto
+//       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+//       .update(razorpay_order_id + "|" + razorpay_payment_id)
+//       .digest("hex");
 
-    const purchases = await Purchase.find({ userId: req.user._id })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+//     // Compare the generated signature with the signature received from the client
+//     if (generated_signature !== razorpay_signature) {
+//       return res.status(400).json({
+//         error: "Payment verification failed",
+//         message: "Payment signature verification failed",
+//       });
+//     }
 
-    const total = await Purchase.countDocuments({ userId: req.user._id });
+//     // At this point, the payment signature is valid, so we can trust the payment
+//     console.log("Payment signature verified:", razorpay_signature);
 
-    res.json({
-      purchases,
-      pagination: {
-        total,
-        page,
-        limit,
-        pages: Math.ceil(total / limit),
-      },
-    });
-  } catch (error) {
-    await logIssue(
-      req.user._id,
-      req.user.clerkId,
-      "purchase_history",
-      "Failed to get purchase history",
-      error.stack
-    );
-    next(error);
-  }
-});
+//     // Create a purchase record
+//     const purchase = new Purchase({
+//       paymentId: razorpay_payment_id,
+//       status: "completed",
+//       completedAt: new Date(),
+//       userId: req.user._id,
+//       clerkId: req.user.clerkId,
+//       amount,
+//       credits,
+//       paymentId,
+//       status: "completed", // In a real app, this would be set after payment confirmation
+//       completedAt: new Date(),
+//     });
+
+//     await purchase.save();
+//     console.log("purchase", purchase);
+
+//     // Add credits to user account
+//     const updatedUser = await User.findByIdAndUpdate(
+//       req.user._id,
+//       { $inc: { credits } },
+//       { new: true }
+//     );
+
+//     res.status(201).json({
+//       message: `Added ${credits} credits successfully`,
+//       purchase: {
+//         id: purchase._id,
+//         amount,
+//         credits,
+//         status: purchase.status,
+//         completedAt: purchase.completedAt,
+//       },
+//       newCreditBalance: updatedUser.credits,
+//     });
+//   } catch (error) {
+//     await logIssue(
+//       req.user._id,
+//       req.user.clerkId,
+//       "payment_processing",
+//       "Failed to process payment successfully",
+//       error.stack
+//     );
+//     next(error);
+//   }
+// });
+
+// // Get purchase history
+// app.get("/purchases", authenticateUser, async (req, res, next) => {
+//   try {
+//     const page = Number.parseInt(req.query.page) || 1;
+//     const limit = Number.parseInt(req.query.limit) || 10;
+//     const skip = (page - 1) * limit;
+
+//     const purchases = await Purchase.find({ userId: req.user._id })
+//       .sort({ createdAt: -1 })
+//       .skip(skip)
+//       .limit(limit);
+
+//     const total = await Purchase.countDocuments({ userId: req.user._id });
+
+//     res.json({
+//       purchases,
+//       pagination: {
+//         total,
+//         page,
+//         limit,
+//         pages: Math.ceil(total / limit),
+//       },
+//     });
+//   } catch (error) {
+//     await logIssue(
+//       req.user._id,
+//       req.user.clerkId,
+//       "purchase_history",
+//       "Failed to get purchase history",
+//       error.stack
+//     );
+//     next(error);
+//   }
+// });
 
 // Add credits to user account (typically would be part of a payment system)
 app.post("/add-credits", authenticateUser, async (req, res, next) => {

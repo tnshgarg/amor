@@ -1,10 +1,8 @@
-
-import api from './api';
+import api from "./api";
 
 export interface SongInput {
   songTitle: string;
   loveStory: string;
-  coverImage: string;
 }
 
 export interface SongResponse {
@@ -28,8 +26,11 @@ export interface SongDetails {
   isPublic?: boolean;
 }
 
-export const generateSong = async (data: SongInput): Promise<SongResponse> => {
-  const response = await api.post('/generate-song', {
+export const generateSong = async (data: {
+  songTitle: string;
+  loveStory: string;
+}): Promise<SongResponse> => {
+  const response = await api.post("/songs/generate", {
     songTitle: data.songTitle,
     loveStory: data.loveStory,
   });
@@ -37,12 +38,12 @@ export const generateSong = async (data: SongInput): Promise<SongResponse> => {
 };
 
 export const getSongStatus = async (taskId: string): Promise<any> => {
-  const response = await api.get(`/song-status/${taskId}`);
+  const response = await api.get(`/songs/status/${taskId}`);
   return response.data;
 };
 
 export const getCallbackStatus = async (callbackId: string): Promise<any> => {
-  const response = await api.get(`/callback-status/${callbackId}`);
+  const response = await api.get(`/songs/callback-status/${callbackId}`);
   return response.data;
 };
 
@@ -67,6 +68,6 @@ export const unshareSong = async (songId: string): Promise<any> => {
 };
 
 export const getSharedSong = async (shareId: string): Promise<any> => {
-  const response = await api.get(`/shared-song/${shareId}`);
+  const response = await api.get(`/songs/${shareId}/share`);
   return response.data;
 };

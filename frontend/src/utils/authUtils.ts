@@ -42,8 +42,8 @@ export const fetchUserProfile = async (): Promise<any> => {
 
     const response = await fetch(
       `${
-        import.meta.env.VITE_API_BASE_URL || "https://amorbackend.onrender.com"
-      }/profile`,
+        import.meta.env.VITE_API_BASE_URL || "http://localhost:3000"
+      }/users/profile`,
       {
         headers: {
           Authorization: `Bearer ${token}`,

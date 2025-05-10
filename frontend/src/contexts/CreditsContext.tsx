@@ -3,6 +3,7 @@ import { useUser } from "@clerk/clerk-react";
 import {
   getUserProfile,
   addCredits as addCreditsToUser,
+  deductCredits as deductCreditsFromUser,
 } from "@/services/userService";
 import { toast } from "@/hooks/use-toast";
 
@@ -10,7 +11,7 @@ interface CreditsContextType {
   credits: number;
   setCredits: (credits: number) => void;
   addCredits: (amount: number) => Promise<boolean>;
-  deductCredits: (amount: number) => boolean;
+  deductCredits: (amount: number) => Promise<boolean>;
   loading: boolean;
 }
 
@@ -77,17 +78,26 @@ export const CreditsProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  const deductCredits = (amount: number): boolean => {
+  const deductCredits = async (amount: number): Promise<boolean> => {
     if (!isSignedIn || !user) return false;
 
-    if (credits >= amount) {
-      // In a real app, this would be handled by the backend automatically
-      // Here we're just updating the local state since credits get deducted
-      // on the server during song generation
-      setCredits((prevCredits) => prevCredits - amount);
-      return true;
+    try {
+      const result = await deductCreditsFromUser(amount);
+
+      if (result && result.newCreditBalance !== undefined) {
+        setCredits(result.newCreditBalance);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("Error deducting credits:", error);
+      toast({
+        title: "Failed to deduct credits",
+        description: "Please try again later",
+        variant: "destructive",
+      });
+      return false;
     }
-    return false;
   };
 
   return (

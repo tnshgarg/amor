@@ -5,7 +5,10 @@ import { useClerk, SignedIn, SignedOut } from "@clerk/clerk-react";
 import { Check, Heart, Star, Music } from "lucide-react";
 import { useState } from "react";
 import { toast } from "@/hooks/use-toast";
-import { addCredits as addCreditsApi } from "@/services/userService";
+import {
+  addCredits as addCreditsApi,
+  createOrder,
+} from "@/services/userService";
 import { useCredits } from "@/contexts/CreditsContext";
 
 const Pricing = () => {
@@ -18,7 +21,8 @@ const Pricing = () => {
     {
       name: "Starter",
       price: "₹49",
-      description: "Perfect for a first-time gift to express your feelings to someone special.",
+      description:
+        "Perfect for a first-time gift to express your feelings to someone special.",
       highlight: false,
       buttonText: "Choose Starter",
       creditsDisplay: "1 Credit",
@@ -29,7 +33,8 @@ const Pricing = () => {
     {
       name: "First Crush",
       price: "₹99",
-      description: "Celebrate your relationship with multiple songs for different occasions.",
+      description:
+        "Celebrate your relationship with multiple songs for different occasions.",
       highlight: true,
       buttonText: "Choose First Crush",
       creditsDisplay: "3 Credits",
@@ -40,60 +45,101 @@ const Pricing = () => {
     {
       name: "Hopeless Romantic",
       price: "₹149",
-      description: "The ultimate expression of love with a collection of songs to cherish forever.",
+      description:
+        "The ultimate expression of love with a collection of songs to cherish forever.",
       highlight: false,
       buttonText: "Choose Romantic",
       creditsDisplay: "5 Credits",
       versions: "10 Versions",
       credits: 5,
       amount: 14900, // Amount in paise
-    }
+    },
   ];
 
-  const handlePurchase = async (plan: typeof plans[0]) => {
+  const handlePurchase = async (plan: (typeof plans)[0]) => {
     setIsProcessing(true);
-    
+
     toast({
       title: "Processing your purchase",
-      description: "Please wait while we process your payment...",
+      description: "Please wait while we initiate your payment...",
     });
-    
+
     try {
-      const result = await addCreditsApi(plan.name, plan.credits, plan.amount);
-      
-      if (result) {
-        if (result.newCreditBalance !== undefined) {
-          setCredits(result.newCreditBalance);
-        }
-        
-        toast({
-          title: "Purchase successful!",
-          description: `You've added ${plan.credits} credits to your account.`,
-        });
-        
-        navigate("/payment-loading", { 
-          state: { 
-            success: true,
-            plan: plan.name,
-            credits: plan.credits
-          } 
-        });
+      // 1. Create order on backend
+      const order = await createOrder(plan.amount);
+
+      if (!order) {
+        throw new Error("Failed to create order");
       }
+
+      // 2. Initialize Razorpay checkout
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID, // Replace with your key
+        amount: plan.amount,
+        currency: "INR",
+        name: "LoveSongAI",
+        description: `Purchase ${plan.credits} credits`,
+        order_id: order,
+        handler: async (response: any) => {
+          // 3. On success, call /process-payment
+          try {
+            const paymentResult = await addCreditsApi(
+              response.razorpay_payment_id,
+              plan.amount,
+              plan.credits
+            );
+
+            if (paymentResult) {
+              if (paymentResult.newCreditBalance !== undefined) {
+                setCredits(paymentResult.newCreditBalance);
+              }
+
+              toast({
+                title: "Purchase successful!",
+                description: `You've added ${plan.credits} credits to your account.`,
+              });
+
+              navigate("/payment-loading", {
+                state: {
+                  success: true,
+                  plan: plan.name,
+                  credits: plan.credits,
+                },
+              });
+            }
+          } catch (paymentError) {
+            console.error("Error processing payment:", paymentError);
+            toast({
+              title: "Payment failed",
+              description: "Please try again later or contact support.",
+              variant: "destructive",
+            });
+
+            navigate("/payment-loading", {
+              state: {
+                success: false,
+                plan: plan.name,
+              },
+            });
+          }
+        },
+        prefill: {
+          name: "", // You can get this from Clerk or user input
+          email: "", // You can get this from Clerk or user input
+          contact: "", // You can get this from user input
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
     } catch (error) {
-      console.error("Error processing payment:", error);
+      console.error("Error during payment process:", error);
       toast({
-        title: "Payment failed",
-        description: "Please try again later or contact support.",
-        variant: "destructive"
+        title: "Payment process failed",
+        description:
+          "An error occurred while initiating the payment. Please try again later.",
+        variant: "destructive",
       });
-      
-      navigate("/payment-loading", { 
-        state: { 
-          success: false,
-          plan: plan.name
-        } 
-      });
-    } finally {
       setIsProcessing(false);
     }
   };
@@ -105,7 +151,7 @@ const Pricing = () => {
     "Share via link and social media",
     "MP3 download",
     "Priority support",
-    "Unlimited revisions"
+    "Unlimited revisions",
   ];
 
   return (
@@ -117,12 +163,16 @@ const Pricing = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <h1 className="text-4xl font-bold mb-4">Simple and Transparent Pricing</h1>
+          <h1 className="text-4xl font-bold mb-4">
+            Simple and Transparent Pricing
+          </h1>
           <p className="text-lg text-foreground/70 mb-2">
-            Choose the plan that's right for you and start creating beautiful, personalized love songs.
+            Choose the plan that's right for you and start creating beautiful,
+            personalized love songs.
           </p>
           <p className="text-md text-love-500 font-medium">
-            <Music className="inline h-4 w-4 mr-1" /> Each credit gives you 2 unique versions of every song you create!
+            <Music className="inline h-4 w-4 mr-1" /> Each credit gives you 2
+            unique versions of every song you create!
           </p>
         </motion.div>
 
@@ -144,7 +194,11 @@ const Pricing = () => {
                   Popular
                 </div>
               )}
-              <div className={`p-6 ${plan.highlight ? "bg-love-50 dark:bg-love-900/20" : ""}`}>
+              <div
+                className={`p-6 ${
+                  plan.highlight ? "bg-love-50 dark:bg-love-900/20" : ""
+                }`}
+              >
                 <h3 className="text-2xl font-bold mb-2">{plan.name}</h3>
                 <div className="mb-4">
                   <span className="text-4xl font-bold">{plan.price}</span>
@@ -164,7 +218,9 @@ const Pricing = () => {
                 <SignedOut>
                   <Button
                     className={`w-full ${
-                      plan.highlight ? "love-button" : "border-love-300 hover:border-love-500 hover:text-love-500"
+                      plan.highlight
+                        ? "love-button"
+                        : "border-love-300 hover:border-love-500 hover:text-love-500"
                     }`}
                     variant={plan.highlight ? "default" : "outline"}
                     onClick={() => openSignUp()}
@@ -175,7 +231,9 @@ const Pricing = () => {
                 <SignedIn>
                   <Button
                     className={`w-full ${
-                      plan.highlight ? "love-button" : "border-love-300 hover:border-love-500 hover:text-love-500"
+                      plan.highlight
+                        ? "love-button"
+                        : "border-love-300 hover:border-love-500 hover:text-love-500"
                     }`}
                     variant={plan.highlight ? "default" : "outline"}
                     onClick={() => handlePurchase(plan)}
@@ -188,8 +246,8 @@ const Pricing = () => {
             </motion.div>
           ))}
         </div>
-        
-        <motion.div 
+
+        <motion.div
           className="mt-12 max-w-3xl mx-auto text-center"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -207,34 +265,46 @@ const Pricing = () => {
         </motion.div>
 
         <div className="mt-20 max-w-3xl mx-auto">
-          <h2 className="text-2xl font-bold mb-6 text-center">Frequently Asked Questions</h2>
-          
+          <h2 className="text-2xl font-bold mb-6 text-center">
+            Frequently Asked Questions
+          </h2>
+
           <div className="space-y-6">
             <div className="bg-card rounded-lg p-6 border border-love-100 dark:border-love-800/50">
               <h3 className="font-semibold mb-2">How do credits work?</h3>
               <p className="text-foreground/80">
-                Each credit allows you to generate one complete love song with two unique versions. Once you've used your credits, you can purchase a new plan to get more credits.
+                Each credit allows you to generate one complete love song with
+                two unique versions. Once you've used your credits, you can
+                purchase a new plan to get more credits.
               </p>
             </div>
-            
+
             <div className="bg-card rounded-lg p-6 border border-love-100 dark:border-love-800/50">
-              <h3 className="font-semibold mb-2">What payment methods do you accept?</h3>
+              <h3 className="font-semibold mb-2">
+                What payment methods do you accept?
+              </h3>
               <p className="text-foreground/80">
-                We accept all major credit cards, PayPal, and select regional payment methods. All transactions are secure and encrypted.
+                We accept all major credit cards, PayPal, and select regional
+                payment methods. All transactions are secure and encrypted.
               </p>
             </div>
-            
+
             <div className="bg-card rounded-lg p-6 border border-love-100 dark:border-love-800/50">
-              <h3 className="font-semibold mb-2">Can I upgrade my plan later?</h3>
+              <h3 className="font-semibold mb-2">
+                Can I upgrade my plan later?
+              </h3>
               <p className="text-foreground/80">
-                Yes! You can upgrade your plan at any time. When you upgrade, you'll receive the additional credits from your new plan.
+                Yes! You can upgrade your plan at any time. When you upgrade,
+                you'll receive the additional credits from your new plan.
               </p>
             </div>
-            
+
             <div className="bg-card rounded-lg p-6 border border-love-100 dark:border-love-800/50">
               <h3 className="font-semibold mb-2">Do you offer refunds?</h3>
               <p className="text-foreground/80">
-                If you're not satisfied with your song, please contact our support team within 14 days of purchase. We'll work with you to revise your song or provide a refund if necessary.
+                If you're not satisfied with your song, please contact our
+                support team within 14 days of purchase. We'll work with you to
+                revise your song or provide a refund if necessary.
               </p>
             </div>
           </div>
@@ -243,5 +313,11 @@ const Pricing = () => {
     </div>
   );
 };
+
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
 
 export default Pricing;
